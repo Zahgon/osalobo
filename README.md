@@ -1,10 +1,10 @@
 # Gin Boilerplate
 
-A production-ready boilerplate for building REST APIs with Go and Gin framework. This boilerplate includes essential features like database integration, API documentation, logging, error handling, and containerization support.
+A production-ready boilerplate for building REST APIs with Go and Echo framework. This boilerplate includes essential features like database integration, API documentation, logging, error handling, and containerization support.
 
 ## 🚀 Features
 
-- [x] [Gin Framework](https://github.com/gin-gonic/gin) for routing and middleware
+- [x] [Echo Framework](https://github.com/labstack/echo) for routing and middleware
 - [x] PostgreSQL integration with migration support
 - [x] Swagger API documentation
 - [x] API monitoring with APIToolkit

@@ -1,14 +1,12 @@
 package routes
 
 import (
-	"github.com/gin-gonic/gin"
+	"github.com/labstack/echo/v4"
 
 	"github.com/CeoFred/gin-boilerplate/internal/bootstrap"
 )
 
-func Routes(r *gin.RouterGroup, d *bootstrap.AppDependencies) {
-
+func Routes(r *echo.Group, d *bootstrap.AppDependencies) {
 	RegisterUserRoutes(r, d)
 	RegisterAuthRoutes(r, d)
-
 }

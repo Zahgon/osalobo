@@ -15,8 +15,8 @@ import (
 	"github.com/CeoFred/gin-boilerplate/internal/otp"
 	"github.com/gofrs/uuid"
 
-	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt"
+	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -117,36 +117,31 @@ type OtpVerifyInput struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /auth/login [post]
-func (a *AuthHandler) Authenticate(c *gin.Context) {
+func (a *AuthHandler) Authenticate(c echo.Context) error {
 
 	var input AuthenticateUser
-	validatedReqBody, exists := c.Get("validatedRequestBody")
+	validatedReqBody := c.Get("validatedRequestBody")
 
-	if !exists {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.INVALID_REQUEST_BODY), http.StatusBadRequest)
-		return
+	if validatedReqBody == nil {
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.INVALID_REQUEST_BODY), http.StatusBadRequest)
 	}
 
 	input, ok := validatedReqBody.(AuthenticateUser)
 	if !ok {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.REQUEST_BODY_PARSE_ERROR), http.StatusBadRequest)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.REQUEST_BODY_PARSE_ERROR), http.StatusBadRequest)
 	}
 
 	user, userExist, err := a.deps.UserRepo.FindByCondition("email = ?", strings.ToLower(input.Email))
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	if !userExist {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf("invalid account credentials"), http.StatusBadRequest)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf("invalid account credentials"), http.StatusBadRequest)
 	}
 
 	if !user.EmailVerified {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf("account not verified"), http.StatusBadRequest)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf("account not verified"), http.StatusBadRequest)
 	}
 
 	hashedPassword := []byte(user.Password)
@@ -154,32 +149,28 @@ func (a *AuthHandler) Authenticate(c *gin.Context) {
 	err = bcrypt.CompareHashAndPassword(hashedPassword, plainPassword)
 
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	timeNow, err := helpers.TimeNow("Africa/Lagos")
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	user.LastLogin = timeNow
-	user.IP = c.ClientIP()
+	user.IP = c.RealIP()
 
 	_, err = a.deps.UserRepo.Save(user)
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	jwtToken, err := helpers.GenerateToken(constant.JWTSecretKey, user.Email, user.FirstName, (user.ID).String())
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
-	helpers.ReturnJSON(c, "Authenticated successfully", map[string]interface{}{
+	return helpers.ReturnJSON(c, "Authenticated successfully", map[string]interface{}{
 		"access_token": jwtToken,
 		"expires_in":   time.Now().Local().Add(time.Hour * 24 * 20),
 	}, http.StatusOK)
@@ -208,50 +199,44 @@ func (a *AuthHandler) findUserOrError(email string) (user *models.User, err erro
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /auth/register [post]
-func (a *AuthHandler) Register(c *gin.Context) {
+func (a *AuthHandler) Register(c echo.Context) error {
 
 	var input InputCreateUser
-	validatedReqBody, exists := c.Get("validatedRequestBody")
+	validatedReqBody := c.Get("validatedRequestBody")
 
-	if !exists {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.INVALID_REQUEST_BODY), http.StatusBadRequest)
-		return
+	if validatedReqBody == nil {
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.INVALID_REQUEST_BODY), http.StatusBadRequest)
 	}
 
 	input, ok := validatedReqBody.(InputCreateUser)
 	if !ok {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.REQUEST_BODY_PARSE_ERROR), http.StatusBadRequest)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.REQUEST_BODY_PARSE_ERROR), http.StatusBadRequest)
 	}
 
 	_, found, err := a.deps.UserRepo.FindByCondition("email", input.Email)
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	if found {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf("account already exists"), http.StatusConflict)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf("account already exists"), http.StatusConflict)
 	}
 
 	hash, err := helpers.HashPassword(input.Password)
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	ID, err := uuid.NewV7()
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 	// create record
 	user := &models.User{
 		Email:         strings.ToLower(input.Email),
 		Password:      hash,
 		ID:            ID,
-		IP:            c.ClientIP(),
+		IP:            c.RealIP(),
 		Role:          models.UserRole,
 		EmailVerified: false,
 		CreatedAt:     time.Now(),
@@ -261,8 +246,7 @@ func (a *AuthHandler) Register(c *gin.Context) {
 	}
 
 	if err := a.deps.UserRepo.Create(user); err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	baseURL := helpers.GetBaseURL(c)
@@ -271,13 +255,12 @@ func (a *AuthHandler) Register(c *gin.Context) {
 
 	eventJSON, err := json.Marshal(user)
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	go a.deps.EventProducer.BroadCast(1, "signup", eventJSON)
 
-	helpers.ReturnJSON(c, "Account created successfully", user, http.StatusCreated)
+	return helpers.ReturnJSON(c, "Account created successfully", user, http.StatusCreated)
 
 }
 
@@ -295,7 +278,7 @@ func (a *AuthHandler) Register(c *gin.Context) {
 // @Success 302 {string} string "Redirects to the client URL with a jwt token"
 // @Failure 302 {string} string "Redirects to the client URL with an error code"
 // @Router /auth/verify/{email}/{otp} [get]
-func (a *AuthHandler) VerifyEmail(c *gin.Context) {
+func (a *AuthHandler) VerifyEmail(c echo.Context) error {
 	email := c.Param("email")
 	token := c.Param("otp")
 
@@ -303,31 +286,26 @@ func (a *AuthHandler) VerifyEmail(c *gin.Context) {
 	clientUrl := constant.ClientUrl
 
 	if err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("%s/auth?error=500", clientUrl))
-		return
+		return redirect(c, http.StatusFound, fmt.Sprintf("%s/auth?error=500", clientUrl))
 	}
 	if !userExist {
-		c.Redirect(http.StatusFound, fmt.Sprintf("%s/auth?error=402", clientUrl))
-		return
+		return redirect(c, http.StatusFound, fmt.Sprintf("%s/auth?error=402", clientUrl))
 	}
 
 	jwtToken, err := helpers.GenerateToken(constant.JWTSecretKey, user.Email, user.FirstName, user.ID.String())
 
 	if err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("%s/auth?error=500", clientUrl))
-		return
+		return redirect(c, http.StatusFound, fmt.Sprintf("%s/auth?error=500", clientUrl))
 	}
 
 	if user.EmailVerified {
-		c.Redirect(http.StatusFound, fmt.Sprintf("%s/signin?&token=%s", clientUrl, jwtToken))
-		return
+		return redirect(c, http.StatusFound, fmt.Sprintf("%s/signin?&token=%s", clientUrl, jwtToken))
 	}
 
 	valid := otp.OTPManage.VerifyOTP(email, token)
 
 	if !valid {
-		c.Redirect(http.StatusFound, fmt.Sprintf("%s/auth?error=401V", clientUrl))
-		return
+		return redirect(c, http.StatusFound, fmt.Sprintf("%s/auth?error=401V", clientUrl))
 	}
 
 	user.EmailVerified = true
@@ -337,11 +315,10 @@ func (a *AuthHandler) VerifyEmail(c *gin.Context) {
 	_, err = a.deps.UserRepo.Save(user)
 
 	if err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("%s/auth?error=500", clientUrl))
-		return
+		return redirect(c, http.StatusFound, fmt.Sprintf("%s/auth?error=500", clientUrl))
 	}
 
-	c.Redirect(http.StatusFound, fmt.Sprintf("%s/signin?token=%s", clientUrl, jwtToken))
+	return redirect(c, http.StatusFound, fmt.Sprintf("%s/signin?token=%s", clientUrl, jwtToken))
 }
 
 // ForgotPassword is a route handler that sends the reset otp to the user's email address.
@@ -357,27 +334,24 @@ func (a *AuthHandler) VerifyEmail(c *gin.Context) {
 // @Success 200 {string} string "Returns 'success' "
 // @Failure 400 {string} string "Returns error message"
 // @Router /auth/forgot-password [post]
-func (a *AuthHandler) ForgotPassword(c *gin.Context) {
+func (a *AuthHandler) ForgotPassword(c echo.Context) error {
 	var input ForgotPasswordInput
 
-	validatedReqBody, exists := c.Get("validatedRequestBody")
+	validatedReqBody := c.Get("validatedRequestBody")
 
-	if !exists {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.INVALID_REQUEST_BODY), http.StatusBadRequest)
-		return
+	if validatedReqBody == nil {
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.INVALID_REQUEST_BODY), http.StatusBadRequest)
 	}
 
 	input, ok := validatedReqBody.(ForgotPasswordInput)
 	if !ok {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.REQUEST_BODY_PARSE_ERROR), http.StatusBadRequest)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.REQUEST_BODY_PARSE_ERROR), http.StatusBadRequest)
 	}
 
 	userFound, err := a.findUserOrError(input.Email)
 
 	if userFound == nil && err != nil {
-		helpers.ReturnJSON(c, "Action successful", nil, http.StatusOK)
-		return
+		return helpers.ReturnJSON(c, "Action successful", nil, http.StatusOK)
 	}
 
 	var fullName string = userFound.FirstName + userFound.LastName
@@ -389,7 +363,7 @@ func (a *AuthHandler) ForgotPassword(c *gin.Context) {
 
 	go a.deps.EmailService.SendForgotPasswordEmail(fullName, email)
 
-	helpers.ReturnJSON(c, "Action successful", nil, http.StatusOK)
+	return helpers.ReturnJSON(c, "Action successful", nil, http.StatusOK)
 }
 
 // VerifyResetOTP is a route handler that verifies the user's email address.
@@ -405,49 +379,43 @@ func (a *AuthHandler) ForgotPassword(c *gin.Context) {
 // @Success 200 {string} string "Returns 'success and JWT' "
 // @Failure 400 {string} string "Returns error message"
 // @Router /auth/forgot-password/verify/ [post]
-func (a *AuthHandler) VerifyResetOTP(c *gin.Context) {
+func (a *AuthHandler) VerifyResetOTP(c echo.Context) error {
 	var input OtpVerifyInput
 
-	validatedReqBody, exists := c.Get("validatedRequestBody")
+	validatedReqBody := c.Get("validatedRequestBody")
 
-	if !exists {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.INVALID_REQUEST_BODY), http.StatusBadRequest)
-		return
+	if validatedReqBody == nil {
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.INVALID_REQUEST_BODY), http.StatusBadRequest)
 	}
 
 	input, ok := validatedReqBody.(OtpVerifyInput)
 	if !ok {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.REQUEST_BODY_PARSE_ERROR), http.StatusBadRequest)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.REQUEST_BODY_PARSE_ERROR), http.StatusBadRequest)
 	}
 
 	user, userExist, err := a.deps.UserRepo.FindByCondition("email", input.Email)
 
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	if !userExist {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf("user account does not exist"), http.StatusBadRequest)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf("user account does not exist"), http.StatusBadRequest)
 	}
 
 	valid := otp.OTPManage.VerifyOTP(input.Email, input.Token)
 
 	if !valid {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf("invalid opt"), http.StatusBadRequest)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf("invalid opt"), http.StatusBadRequest)
 	}
 
 	jwtToken, err := helpers.GenerateToken(constant.JWTSecretKey, user.Email, user.FirstName, user.ID.String())
 
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
-	helpers.ReturnJSON(c, "Verified", map[string]interface{}{
+	return helpers.ReturnJSON(c, "Verified", map[string]interface{}{
 		"access_token": jwtToken,
 	}, http.StatusOK)
 
@@ -466,22 +434,20 @@ func (a *AuthHandler) VerifyResetOTP(c *gin.Context) {
 // @Success 200 {string} string "Success: Password reset"
 // @Failure 400 {string} string "Error: Invalid input or token"
 // @Router /auth/reset-password/confirm/{reset-token} [post]
-func (a *AuthHandler) ResetPassword(c *gin.Context) {
-	resetToken := c.Params.ByName("reset-token")
+func (a *AuthHandler) ResetPassword(c echo.Context) error {
+	resetToken := c.Param("reset-token")
 
 	var input ResetPasswordInput
 
-	validatedReqBody, exists := c.Get("validatedRequestBody")
+	validatedReqBody := c.Get("validatedRequestBody")
 
-	if !exists {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.INVALID_REQUEST_BODY), http.StatusBadRequest)
-		return
+	if validatedReqBody == nil {
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.INVALID_REQUEST_BODY), http.StatusBadRequest)
 	}
 
 	input, ok := validatedReqBody.(ResetPasswordInput)
 	if !ok {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.REQUEST_BODY_PARSE_ERROR), http.StatusBadRequest)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.REQUEST_BODY_PARSE_ERROR), http.StatusBadRequest)
 	}
 
 	token, err := jwt.ParseWithClaims(
@@ -492,25 +458,21 @@ func (a *AuthHandler) ResetPassword(c *gin.Context) {
 	claims := token.Claims.(*helpers.AuthTokenJwtClaim)
 
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	user, _, err := a.deps.UserRepo.FindByCondition("user_id", claims.UserId)
 
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	if user == nil {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf("user not found"), http.StatusNotFound)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf("user not found"), http.StatusNotFound)
 	}
 
 	if input.Password != input.PasswordConfirm {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "fail", "message": "Passwords do not match"})
-		return
+		return writeJSON(c, http.StatusBadRequest, map[string]interface{}{"status": "fail", "message": "Passwords do not match"})
 	}
 
 	hashedPassword, _ := helpers.HashPassword(input.Password)
@@ -523,9 +485,15 @@ func (a *AuthHandler) ResetPassword(c *gin.Context) {
 	_, err = a.deps.UserRepo.Save(user)
 
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
-	helpers.ReturnJSON(c, "Password updated successfully", user, http.StatusOK)
+	return helpers.ReturnJSON(c, "Password updated successfully", user, http.StatusOK)
+}
+
+// redirect writes the same "<a href=...>Found</a>" body net/http produces, which
+// echo.Context.Redirect omits.
+func redirect(c echo.Context, code int, url string) error {
+	http.Redirect(c.Response(), c.Request(), url, code)
+	return nil
 }

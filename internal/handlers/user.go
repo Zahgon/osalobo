@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -9,7 +10,7 @@ import (
 
 	"github.com/cloudinary/cloudinary-go"
 	"github.com/cloudinary/cloudinary-go/api/uploader"
-	"github.com/gin-gonic/gin"
+	"github.com/labstack/echo/v4"
 
 	"github.com/CeoFred/gin-boilerplate/constants"
 	bootstrap "github.com/CeoFred/gin-boilerplate/internal/bootstrap"
@@ -60,48 +61,42 @@ type UpdateUserProfileInput struct {
 // @Success 200 {object} SuccessResponse
 // @Failure 401 {object} ErrorResponse
 // @Router /user [put]
-func (u *UserHandler) UpdateUserProfile(c *gin.Context) {
+func (u *UserHandler) UpdateUserProfile(c echo.Context) error {
 	var input UpdateUserProfileInput
 
-	validatedReqBody, exists := c.Get("validatedRequestBody")
+	validatedReqBody := c.Get("validatedRequestBody")
 
-	if !exists {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.INVALID_REQUEST_BODY), http.StatusBadRequest)
-		return
+	if validatedReqBody == nil {
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.INVALID_REQUEST_BODY), http.StatusBadRequest)
 	}
 
 	input, ok := validatedReqBody.(UpdateUserProfileInput)
 	if !ok {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.REQUEST_BODY_PARSE_ERROR), http.StatusBadRequest)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf(helpers.REQUEST_BODY_PARSE_ERROR), http.StatusBadRequest)
 	}
 
 	claims, err := helpers.GetAuthenticatedUser(c)
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	user, found, err := u.deps.UserRepo.FindByCondition("email = ?", claims.Email)
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	if !found {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf("user not found"), http.StatusNotFound)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf("user not found"), http.StatusNotFound)
 	}
 
 	user.PhoneNumber = input.PhoneNumber
 
 	_, err = u.deps.UserRepo.Save(user)
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
-	helpers.ReturnJSON(c, "Profile updated successfully", user, http.StatusOK)
+	return helpers.ReturnJSON(c, "Profile updated successfully", user, http.StatusOK)
 }
 
 // UserProfile is a route handler that retrieves the user profile of the authenticated user.
@@ -117,33 +112,30 @@ func (u *UserHandler) UpdateUserProfile(c *gin.Context) {
 // @Success 200 {object} models.User
 // @Failure 401 {object} ErrorResponse
 // @Router /user/profile [get]
-func (u *UserHandler) UserProfile(c *gin.Context) {
+func (u *UserHandler) UserProfile(c echo.Context) error {
 
-	claimsRaw, exists := c.Get("claims")
-	if !exists {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
+	claimsRaw := c.Get("claims")
+
+	if claimsRaw == nil {
+		return writeJSON(c, http.StatusUnauthorized, map[string]interface{}{"error": "Unauthorized"})
 	}
 
 	authClaims, ok := claimsRaw.(*helpers.AuthTokenJwtClaim)
 	if !ok {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
+		return writeJSON(c, http.StatusUnauthorized, map[string]interface{}{"error": "Unauthorized"})
 	}
 
 	user, f, err := u.deps.UserRepo.FindByCondition("user_id = ?", authClaims.UserId)
 
 	if err != nil {
-		helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
-		return
+		return helpers.ReturnError(c, "Something went wrong", err, http.StatusInternalServerError)
 	}
 
 	if !f {
-		helpers.ReturnError(c, "Something went wrong", fmt.Errorf("account not found"), http.StatusNotFound)
-		return
+		return helpers.ReturnError(c, "Something went wrong", fmt.Errorf("account not found"), http.StatusNotFound)
 	}
 
-	helpers.ReturnJSON(c, "Profile retrieved", user, http.StatusOK)
+	return helpers.ReturnJSON(c, "Profile retrieved", user, http.StatusOK)
 
 }
 
@@ -179,7 +171,18 @@ func uploadFile(file *multipart.FileHeader) (resp *uploader.UploadResult, err er
 }
 
 // NotFound returns custom 404 page
-func NotFound(c *gin.Context) {
-	c.Status(404)
-	c.File("./static/private/404.html")
+func NotFound(c echo.Context) error {
+	c.Response().Status = 404
+	return c.File("./static/private/404.html")
+}
+
+// writeJSON mirrors what gin wrote for the two handlers that build a response envelope
+// inline: a compact body typed "application/json; charset=utf-8". echo.Context.JSON
+// would append a newline and spell the charset "UTF-8".
+func writeJSON(c echo.Context, statusCode int, payload interface{}) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return c.Blob(statusCode, "application/json; charset=utf-8", body)
 }

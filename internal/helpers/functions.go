@@ -3,6 +3,7 @@ package helpers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
@@ -19,8 +20,8 @@ import (
 	"github.com/cloudinary/cloudinary-go"
 	"github.com/cloudinary/cloudinary-go/api/admin"
 	"github.com/cloudinary/cloudinary-go/api/uploader"
-	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt"
+	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/CeoFred/gin-boilerplate/constants"
@@ -90,10 +91,10 @@ func UploadFile(file io.Reader, filename string) (*uploader.UploadResult, error)
 	return resp, nil
 }
 
-func BaseURL(c *gin.Context) string {
+func BaseURL(c echo.Context) string {
 
 	scheme := "http" // Default scheme
-	isLocal := gin.Mode() == gin.DebugMode
+	isLocal := c.Echo().Debug
 
 	if isLocal {
 		// Running in local development mode
@@ -104,7 +105,7 @@ func BaseURL(c *gin.Context) string {
 	}
 
 	// Get the host (domain) from the request
-	host := c.Request.Host
+	host := c.Request().Host
 
 	// Construct the base URL by combining the scheme and host
 	baseURL := fmt.Sprintf("%s://%s", scheme, host)
@@ -161,22 +162,32 @@ func GenerateRandomNumber(length int) (int, error) {
 	return int(n.Add(n, min).Int64()), nil
 }
 
-func ReturnJSON(c *gin.Context, message string, data interface{}, statusCode int) {
-	c.Status(statusCode)
-	c.JSON(statusCode, gin.H{
+// writeJSON emits a compact, newline-free body as "application/json; charset=utf-8";
+// echo.Context.JSON would append a newline and spell the charset "UTF-8".
+func writeJSON(c echo.Context, statusCode int, payload interface{}) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return c.Blob(statusCode, "application/json; charset=utf-8", body)
+}
+
+func ReturnJSON(c echo.Context, message string, data interface{}, statusCode int) error {
+	return writeJSON(c, statusCode, map[string]interface{}{
 		"status":  statusCode <= 201,
 		"message": message,
 		"data":    data,
 	})
 }
 
-func ReturnError(c *gin.Context, message string, err error, status int) {
-	c.JSON(status, gin.H{
+func ReturnError(c echo.Context, message string, err error, status int) error {
+	writeErr := writeJSON(c, status, map[string]interface{}{
 		"message": message,
 		"error":   err.Error(),
 		"status":  false,
 	})
 	log.Println("error: ", err.Error())
+	return writeErr
 }
 
 func HashPassword(password string) (string, error) {
@@ -250,9 +261,9 @@ func NewError(message string) *AppError {
 	return &AppError{message: message}
 }
 
-func GetBaseURL(c *gin.Context) string {
+func GetBaseURL(c echo.Context) string {
 	scheme := "http" // Default scheme
-	isLocal := gin.Mode() == gin.DebugMode
+	isLocal := c.Echo().Debug
 
 	if isLocal {
 		// Running in local development mode
@@ -263,20 +274,20 @@ func GetBaseURL(c *gin.Context) string {
 	}
 
 	// Get the host (domain) from the request
-	host := c.Request.Host
+	host := c.Request().Host
 
 	// Construct the base URL by combining the scheme and host
 	baseURL := fmt.Sprintf("%s://%s", scheme, host)
 	return baseURL
 }
 
-func GetAuthenticatedUser(c *gin.Context) (*AuthTokenJwtClaim, error) {
+func GetAuthenticatedUser(c echo.Context) (*AuthTokenJwtClaim, error) {
 
 	var claims *AuthTokenJwtClaim
 
-	user, claims_exists := c.Get("claims")
+	user := c.Get("claims")
 
-	if !claims_exists {
+	if user == nil {
 		return nil, NewError("Failed to retrieve claims")
 	}
 
